@@ -1,0 +1,43 @@
+=============================================================================
+                      VISIONGUIDE HARDWARE CONNECTIONS
+=============================================================================
+
+1. ULTRASONIC SENSOR (HC-SR04) TO ESP32-S3:
+-----------------------------------------------------------------------------
+   HC-SR04 PIN        ESP32-S3 PIN          DESCRIPTION / NOTE
+   --------------------------------------------------------------------------
+   VCC         -----> 5V (VIN / 5V PIN)     Powers the ultrasonic transmitter
+   GND         -----> GND                   Ground reference
+   TRIG        -----> GPIO 5                Ultrasonic trigger pulse (Output)
+   ECHO        -----> GPIO 19               Ultrasonic echo duration (Input)
+
+   POWER SOURCE FOR ESP32-S3:
+   - Power via USB from a 5V Power Bank or 5V Battery pack.
+
+
+2. ESP32-CAM MODULE:
+-----------------------------------------------------------------------------
+   ESP32-CAM PIN      CONNECTION / NOTE
+   --------------------------------------------------------------------------
+   5V / VIN    -----> 5V Output from Power Bank / Battery
+   GND         -----> Ground (GND)
+
+   POWER SOURCE FOR ESP32-CAM:
+   - Power with a 5V Power Bank (or high-current 5V battery source).
+   - ESP32-CAM requires stable >=1.5A peak current during Wi-Fi transmission
+     and video streaming to avoid brownout resets.
+
+
+3. NETWORK & PHONE SETUP:
+-----------------------------------------------------------------------------
+   - All three devices (ESP32-S3, ESP32-CAM, and the Phone) MUST connect 
+     to the SAME Wi-Fi network or Phone Mobile Hotspot.
+   - Central Phone IP: See "Phone IP:" on the app screen (e.g. 10.122.3.219:5000).
+   - ESP32-S3 HTTP endpoints:
+       * Heartbeat:        POST http://<PHONE_IP>:5000/distance
+       * Obstacle Trigger: POST http://<PHONE_IP>:5000/vision_trigger
+   - ESP32-CAM endpoints:
+       * Live Stream:      http://<CAM_IP>:81/stream
+       * Capture Image:    http://<CAM_IP>/capture
+
+=============================================================================

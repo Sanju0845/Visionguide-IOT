@@ -10,8 +10,10 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import android.view.View
 import android.webkit.WebView
 import android.widget.ImageView
+import android.widget.ScrollView
 import android.widget.TextView
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -29,8 +31,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     
     private lateinit var tvCamStatus: TextView
     private lateinit var tvAiStatus: TextView
+    private lateinit var tvHcStatus: TextView
     private lateinit var tvAiResult: TextView
     private lateinit var tvEventLog: TextView
+    private lateinit var svEventLog: ScrollView
     private lateinit var tvLatency: TextView
     private lateinit var tvDistance: TextView
     private lateinit var tvPhoneIp: TextView
@@ -42,6 +46,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var lastSpokenResult = ""
     private var lastCamOnline = false
     private var lastAiReady = false
+    private var lastHcOnline = false
     private var hasAnnouncedLive = false
 
     companion object {
@@ -67,8 +72,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         tvCamStatus = findViewById(R.id.tvCamStatus)
         tvAiStatus = findViewById(R.id.tvAiStatus)
+        tvHcStatus = findViewById(R.id.tvHcStatus)
         tvAiResult = findViewById(R.id.tvAiResult)
         tvEventLog = findViewById(R.id.tvEventLog)
+        svEventLog = findViewById(R.id.svEventLog)
         tvLatency = findViewById(R.id.tvLatency)
         tvDistance = findViewById(R.id.tvDistance)
         tvPhoneIp = findViewById(R.id.tvPhoneIp)
@@ -172,13 +179,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     
                     val camOnline = json.optBoolean("cam_online", false)
                     val aiStatus = json.optString("ai", "OFFLINE")
+                    val hcOnline = json.optBoolean("hc_online", false)
                     val aiReady = aiStatus == "READY"
                     val lastResult = json.optString("last_result", "")
                     val latency = json.optInt("latency_ms", 0)
                     val distance = json.optString("distance_cm", "--")
                     val eventLog = json.optJSONArray("event_log") ?: JSONArray()
                     
-                    runOnUiThread { updateUI(camOnline, aiStatus, lastResult, latency, distance, eventLog) }
+                    runOnUiThread { updateUI(camOnline, aiStatus, hcOnline, lastResult, latency, distance, eventLog) }
                 }
             } catch (e: Exception) {
                 Log.e("VisionGuide", "Poll error", e)
@@ -186,7 +194,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun updateUI(camOnline: Boolean, aiStatus: String, lastResult: String, latency: Int, distance: String, eventLog: JSONArray) {
+    private fun updateUI(
+        camOnline: Boolean,
+        aiStatus: String,
+        hcOnline: Boolean,
+        lastResult: String,
+        latency: Int,
+        distance: String,
+        eventLog: JSONArray
+    ) {
         // Cam Status
         if (camOnline) {
             tvCamStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#22C55E"))
@@ -215,35 +231,69 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         lastAiReady = aiReady
 
+        // HC Sensor Status
+        if (hcOnline) {
+            tvHcStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#22C55E"))
+            if (!lastHcOnline) speak("Ultrasonic sensor active")
+        } else {
+            tvHcStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
+        }
+        lastHcOnline = hcOnline
+
         // Live announcement
         if (camOnline && aiReady && !hasAnnouncedLive) {
             hasAnnouncedLive = true
             speak("All systems connected. VisionGuide is live.")
         }
 
-        // Result handling
+        // Result handling (Compact Banner, not huge empty block)
         if (lastResult.isNotEmpty()) {
             tvAiResult.text = lastResult
             if (lastResult != lastSpokenResult) {
                 speak(lastResult)
                 lastSpokenResult = lastResult
             }
+        } else {
+            tvAiResult.text = "VisionGuide Ready"
         }
         
         // Latency, Distance, and Server IP
         tvLatency.text = "Latency: ${latency}ms"
-        tvDistance.text = if (distance.isNotEmpty() && distance != "--") "US: $distance cm" else "US: -- cm"
+        if (distance.isNotEmpty() && distance != "--") {
+            tvDistance.text = "US: $distance cm"
+            try {
+                val d = distance.toFloat()
+                val trig = triggerCm.toFloatOrNull() ?: 30f
+                if (d <= trig) {
+                    tvDistance.setTextColor(Color.parseColor("#EF4444"))
+                } else {
+                    tvDistance.setTextColor(Color.parseColor("#22C55E"))
+                }
+            } catch (e: Exception) {
+                tvDistance.setTextColor(Color.parseColor("#22C55E"))
+            }
+        } else {
+            tvDistance.text = "US: -- cm"
+            tvDistance.setTextColor(Color.parseColor("#8b949e"))
+        }
+
         val myIp = getLocalIpAddress()
         tvPhoneIp.text = "Phone IP: $myIp:$port"
 
-        // Event log
-        val logStringBuilder = StringBuilder()
-        // Get last 4 elements
-        val startIdx = max(0, eventLog.length() - 4)
-        for (i in startIdx until eventLog.length()) {
-            logStringBuilder.append(eventLog.getString(i)).append("\n")
+        // Live scrollable console outputs
+        if (eventLog.length() > 0) {
+            val logStringBuilder = StringBuilder()
+            for (i in 0 until eventLog.length()) {
+                logStringBuilder.append(eventLog.getString(i)).append("\n")
+            }
+            val newText = logStringBuilder.toString().trim()
+            if (tvEventLog.text.toString() != newText) {
+                tvEventLog.text = newText
+                svEventLog.post {
+                    svEventLog.fullScroll(View.FOCUS_DOWN)
+                }
+            }
         }
-        tvEventLog.text = logStringBuilder.toString().trim()
     }
 
     private fun getLocalIpAddress(): String {

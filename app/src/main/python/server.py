@@ -33,6 +33,8 @@ state = {
     "latency_ms": 0,
     "last_result": "",
     "distance_cm": "--",
+    "hc_online": False,
+    "last_hc_time": 0,
     "event_log": []
 }
 
@@ -50,7 +52,7 @@ if GROQ_API_KEY:
 # ============================================================
 
 def log_event(msg):
-    if len(state["event_log"]) >= 12:
+    if len(state["event_log"]) >= 60:
         state["event_log"].pop(0)
 
     timestamp = time.strftime("%H:%M:%S")
@@ -132,6 +134,12 @@ def check_camera():
 
             last_status = False
 
+        # Expire HC sensor if no packets in 12 seconds
+        if state.get("hc_online", False):
+            if (time.time() - state.get("last_hc_time", 0)) > 12:
+                state["hc_online"] = False
+                log_event("HC-SR04 sensor inactive")
+
         time.sleep(0.5)
 
 
@@ -184,9 +192,11 @@ def update_distance():
             ):
 
                 state["distance_cm"] = distance_string
+                state["hc_online"] = True
+                state["last_hc_time"] = time.time()
 
                 log_event(
-                    f"Ultrasonic distance: {distance_string} cm"
+                    f"Ultrasonic: {distance_string} cm"
                 )
 
         return jsonify({
@@ -261,57 +271,87 @@ def index():
             height: 50vh;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 16px;
-            text-align: center;
+            padding: 12px;
+            background-color: #0a0c10;
         }}
-        .ai-instruction {{
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 24px;
-            flex-grow: 1;
+        .header-row {{
             display: flex;
             align-items: center;
-            justify-content: center;
-            width: 100%;
+            gap: 8px;
+            margin-bottom: 8px;
         }}
         .pill-row {{
             display: flex;
-            gap: 16px;
-            margin-bottom: 16px;
+            gap: 8px;
         }}
         .pill {{
-            padding: 6px 16px;
+            padding: 4px 10px;
             border-radius: 999px;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 11px;
             color: #000;
         }}
         .pill.green {{ background-color: #22c55e; }}
         .pill.red {{ background-color: #ef4444; }}
         .pill.amber {{ background-color: #f59e0b; }}
         
-        .distance {{ color: #22c55e; font-size: 18px; font-weight: bold; margin-bottom: 12px; }}
+        .distance {{ color: #22c55e; font-size: 13px; font-weight: bold; font-family: monospace; margin-left: auto; }}
         
-        .latency {{
-            color: #888888;
-            font-size: 12px;
-            margin-bottom: 16px;
+        .instruction-banner {{
+            background: #161b22;
+            border: 1px solid #238636;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: bold;
+            color: #ffffff;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+        }}
+        .instruction-banner span {{
+            color: #22c55e;
+            font-family: monospace;
+            margin-right: 6px;
+        }}
+
+        .stats-row {{
+            display: flex;
+            justify-content: space-between;
+            color: #8b949e;
+            font-size: 11px;
+            font-family: monospace;
+            margin-bottom: 6px;
+        }}
+
+        .terminal-box {{
+            flex-grow: 1;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }}
+        .terminal-header {{
+            color: #58a6ff;
+            font-family: monospace;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
         }}
         .event-log {{
-            color: #555555;
+            color: #7ee787;
             font-family: monospace;
             font-size: 11px;
             text-align: left;
-            width: 100%;
-            height: 60px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            justify-content: flex-end;
+            flex-grow: 1;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.4;
         }}
-        .event-log div {{ margin-top: 2px; }}
     </style>
 </head>
 <body>
@@ -321,14 +361,29 @@ def index():
         <img class="stream-img" src="http://{cam_ip}:81/stream" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\'><rect width=\\'100%\\' height=\\'100%\\' fill=\\'%23222\\'/><text x=\\'50%\\' y=\\'50%\\' fill=\\'%23666\\' text-anchor=\\'middle\\'>Stream Offline</text></svg>'">
     </div>
     <div class="bottom-half">
-        <div class="ai-instruction" id="ai-instruction">Waiting for AI...</div>
-        <div class="pill-row">
-            <div class="pill red" id="cam-pill">CAM</div>
-            <div class="pill amber" id="ai-pill">AI</div>
+        <div class="header-row">
+            <div class="pill-row">
+                <div class="pill red" id="cam-pill">CAM</div>
+                <div class="pill amber" id="ai-pill">AI API</div>
+                <div class="pill red" id="hc-pill">HC SENSOR</div>
+            </div>
+            <div class="distance" id="distance">US: -- cm</div>
         </div>
-        <div class="distance" id="distance">Distance: -- cm</div>
-        <div class="latency" id="latency">Latency: -- ms</div>
-        <div class="event-log" id="event-log"></div>
+
+        <div class="instruction-banner">
+            <span>AI &gt; </span>
+            <div id="ai-instruction">VisionGuide Ready</div>
+        </div>
+
+        <div class="stats-row">
+            <div id="latency">Latency: -- ms</div>
+            <div>Server: :{PORT}</div>
+        </div>
+
+        <div class="terminal-box">
+            <div class="terminal-header">&#9679; LIVE CONSOLE OUTPUT</div>
+            <div class="event-log" id="event-log"></div>
+        </div>
     </div>
 
     <script>
@@ -348,11 +403,7 @@ def index():
                 
                 // Camera status
                 const camPill = document.getElementById('cam-pill');
-                if (state.cam_online) {{
-                    camPill.className = 'pill green';
-                }} else {{
-                    camPill.className = 'pill red';
-                }}
+                camPill.className = state.cam_online ? 'pill green' : 'pill red';
                 
                 // AI Status
                 const aiPill = document.getElementById('ai-pill');
@@ -363,6 +414,10 @@ def index():
                 }} else {{
                     aiPill.className = 'pill red';
                 }}
+
+                // HC Sensor status
+                const hcPill = document.getElementById('hc-pill');
+                hcPill.className = state.hc_online ? 'pill green' : 'pill red';
                 
                 // Instruction and TTS
                 if (state.last_result && state.last_result !== lastResult) {{
@@ -371,17 +426,15 @@ def index():
                     speak(lastResult);
                 }}
                 
-                // Latency
+                // Latency & Distance
                 document.getElementById('latency').innerText = `Latency: ${{state.latency_ms}} ms`;
-                
-                // Distance
                 document.getElementById('distance').innerText = 
-                    state.distance_cm ? `Distance: ${{state.distance_cm}} cm` : "Distance: -- cm";
+                    state.distance_cm && state.distance_cm !== '--' ? `US: ${{state.distance_cm}} cm` : "US: -- cm";
                 
-                // Event Log (last 4)
+                // Event Log (all events, scroll to bottom)
                 const logDiv = document.getElementById('event-log');
-                const recentLogs = state.event_log.slice(-4);
-                logDiv.innerHTML = recentLogs.map(log => `<div>${{log}}</div>`).join('');
+                logDiv.innerText = state.event_log.join('\\n');
+                logDiv.scrollTop = logDiv.scrollHeight;
                 
             }} catch(e) {{
                 console.error("Poll error", e);
@@ -577,8 +630,13 @@ def vision_trigger():
 
         if distance is not None and str(distance).strip() not in ("", "null", "None"):
             state["distance_cm"] = str(distance)
+            state["hc_online"] = True
+            state["last_hc_time"] = time.time()
             log_event(f"OBSTACLE DETECTED: {distance} cm")
             print(f"[S3] Trigger received | Distance: {distance} cm")
+        else:
+            state["hc_online"] = True
+            state["last_hc_time"] = time.time()
 
         if not cam_ip:
             raise Exception("CAM_IP is not configured")
