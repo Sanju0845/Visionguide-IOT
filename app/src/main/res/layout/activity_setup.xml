@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="VisionGuide Setup"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="24dp"
+            android:layout_gravity="center_horizontal"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ESP32-CAM IP" android:textColor="#AAAAAA"/>
+        <EditText android:id="@+id/etCamIp" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#555555" android:inputType="textUri" android:layout_marginBottom="16dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Groq API Key" android:textColor="#AAAAAA"/>
+        <EditText android:id="@+id/etGroqKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#555555" android:inputType="textPassword" android:layout_marginBottom="16dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Trigger Distance CM" android:textColor="#AAAAAA"/>
+        <EditText android:id="@+id/etTriggerCm" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#555555" android:inputType="number" android:layout_marginBottom="16dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Cooldown Seconds" android:textColor="#AAAAAA"/>
+        <EditText android:id="@+id/etCooldown" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#555555" android:inputType="number" android:layout_marginBottom="16dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Flask Port" android:textColor="#AAAAAA"/>
+        <EditText android:id="@+id/etPort" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#555555" android:inputType="number" android:layout_marginBottom="32dp"/>
+
+        <Button
+            android:id="@+id/btnSaveLaunch"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="Save &amp; Launch VisionGuide"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:backgroundTint="#22C55E"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+</ScrollView>

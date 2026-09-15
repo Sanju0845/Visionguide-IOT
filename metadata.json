@@ -1,0 +1,6 @@
+{
+  "name": "VisionGuide",
+  "description": "Navigation assistant for visually impaired.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
