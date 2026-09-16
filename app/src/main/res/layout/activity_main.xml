@@ -106,6 +106,19 @@
                 android:backgroundTint="#EF4444"
                 android:background="@drawable/pill_bg" />
 
+            <!-- Refresh Button -->
+            <ImageView
+                android:id="@+id/ivRefresh"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginStart="8dp"
+                android:src="@android:drawable/ic_popup_sync"
+                android:tint="#58a6ff"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Refresh connections" />
+
             <!-- Spacer -->
             <View
                 android:layout_width="0dp"

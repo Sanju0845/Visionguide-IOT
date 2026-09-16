@@ -37,6 +37,13 @@ class SetupActivity : Activity() {
                 putBoolean("is_setup", true)
                 apply()
             }
+            
+            // Restart the service to apply new settings immediately
+            val serviceIntent = Intent(this, VisionService::class.java).apply {
+                action = "REFRESH"
+            }
+            startService(serviceIntent)
+            
             startActivity(Intent(this, MainActivity::class.java))
             finish()
         }

@@ -39,6 +39,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var tvDistance: TextView
     private lateinit var tvPhoneIp: TextView
     private lateinit var ivSettings: ImageView
+    private lateinit var ivRefresh: ImageView
     private lateinit var webViewCam: WebView
 
     private var tts: TextToSpeech? = null
@@ -80,10 +81,30 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tvDistance = findViewById(R.id.tvDistance)
         tvPhoneIp = findViewById(R.id.tvPhoneIp)
         ivSettings = findViewById(R.id.ivSettings)
+        ivRefresh = findViewById(R.id.ivRefresh)
         webViewCam = findViewById(R.id.webViewCam)
 
         ivSettings.setOnClickListener {
             startActivity(Intent(this, SetupActivity::class.java))
+        }
+
+        ivRefresh.setOnClickListener {
+            speak("Refreshing connections")
+            val py = Python.getInstance()
+            val serverModule = py.getModule("server")
+            try {
+                serverModule.callAttr(
+                    "configure",
+                    camIp,
+                    groqKey,
+                    triggerCm,
+                    cooldownMs,
+                    port
+                )
+            } catch (e: Exception) {
+                Log.e("VisionGuide", "Error calling configure", e)
+            }
+            webViewCam.reload()
         }
 
         // Setup WebView for MJPEG stream

@@ -702,6 +702,9 @@ def configure(
     except Exception:
         PORT = 5000
 
+    state["cam_online"] = False
+    state["hc_online"] = False
+
     if GROQ_API_KEY:
         try:
             client = Groq(api_key=GROQ_API_KEY)
