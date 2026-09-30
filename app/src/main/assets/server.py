@@ -32,6 +32,7 @@ state = {
     "ai": "STARTING",
     "latency_ms": 0,
     "last_result": "",
+    "error_msg": "",
     "distance_cm": "--",
     "hc_online": False,
     "last_hc_time": 0,
@@ -51,7 +52,20 @@ if GROQ_API_KEY:
 #                 EVENT LOG
 # ============================================================
 
+last_event_msg = ""
+last_event_time = 0
+
 def log_event(msg):
+    global last_event_msg, last_event_time
+    now = time.time()
+    
+    # Suppress consecutive identical log messages within 10 seconds to avoid repeating loops
+    if msg == last_event_msg and (now - last_event_time) < 10:
+        return
+        
+    last_event_msg = msg
+    last_event_time = now
+
     if len(state["event_log"]) >= 60:
         state["event_log"].pop(0)
 
@@ -62,34 +76,55 @@ def log_event(msg):
 
 
 # ============================================================
-#                 CAMERA STATUS MONITOR
+#                 CAMERA STATUS MONITOR & TUNER
 # ============================================================
+
+def configure_camera_low_latency(ip):
+    """
+    Sends control commands to the ESP32-CAM to ensure minimal latency,
+    high compression (quality=25), and lightweight resolution (QVGA 320x240).
+    """
+    try:
+        # framesize 5 = QVGA (320x240), ideal for real-time mobile vision
+        requests.get(f"http://{ip}/control?var=framesize&val=5", timeout=2.0)
+        # quality 25 = higher JPEG compression, small packet size (~6KB)
+        requests.get(f"http://{ip}/control?var=quality&val=25", timeout=2.0)
+        log_event("Camera tuned: QVGA 320x240, Quality 25 (Low Latency)")
+    except Exception as e:
+        print(f"[Cam Tune] Note: {e}")
+
 
 def check_camera():
     global CAM_IP
 
     last_status = False
+    consecutive_failures = 0
+    camera_configured_ip = None
+
+    # Persistent session to prevent socket exhaustion on ESP32
+    session = requests.Session()
+    session.headers.update({"Connection": "close"})
 
     while True:
         current_cam_ip = os.environ.get("CAM_IP", CAM_IP)
         if not current_cam_ip:
-            time.sleep(1)
+            time.sleep(2)
             continue
 
         try:
             url = f"http://{current_cam_ip}/status"
 
-            response = requests.get(
+            # 2.5s timeout allows ESP32-CAM to finish streaming frame
+            response = session.get(
                 url,
-                timeout=0.8
+                timeout=2.5
             )
 
             if response.status_code == 200:
+                consecutive_failures = 0
 
                 try:
                     data = response.json()
-
-                    # Read distance if CAM provides it
                     distance = (
                         data.get("distance")
                         or data.get("distance_cm")
@@ -97,41 +132,37 @@ def check_camera():
 
                     if distance is not None:
                         distance_string = str(distance).strip()
-
-                        if distance_string not in (
-                            "",
-                            "--",
-                            "None",
-                            "null"
-                        ):
+                        if distance_string not in ("", "--", "None", "null"):
                             state["distance_cm"] = distance_string
-
                 except Exception:
                     pass
 
-                state["cam_online"] = True
-
-                if not last_status:
+                if not state["cam_online"]:
+                    state["cam_online"] = True
                     log_event("ESP32-CAM connected")
+
+                # Configure low latency once connected
+                if camera_configured_ip != current_cam_ip:
+                    camera_configured_ip = current_cam_ip
+                    threading.Thread(
+                        target=configure_camera_low_latency,
+                        args=(current_cam_ip,),
+                        daemon=True
+                    ).start()
 
                 last_status = True
 
             else:
-
-                state["cam_online"] = False
-
-                if last_status:
-                    log_event("ESP32-CAM offline")
-
-                last_status = False
+                consecutive_failures += 1
 
         except Exception:
+            consecutive_failures += 1
 
+        # Debounce: only mark offline after 3 consecutive failed probes (7.5+ seconds)
+        if consecutive_failures >= 3 and state["cam_online"]:
             state["cam_online"] = False
-
-            if last_status:
-                log_event("ESP32-CAM connection lost")
-
+            camera_configured_ip = None
+            log_event("ESP32-CAM connection lost")
             last_status = False
 
         # Expire HC sensor if no packets in 12 seconds
@@ -140,7 +171,8 @@ def check_camera():
                 state["hc_online"] = False
                 log_event("HC-SR04 sensor inactive")
 
-        time.sleep(0.5)
+        # Probe every 2.5s instead of 0.5s to prevent socket flooding
+        time.sleep(2.5)
 
 
 # ============================================================
@@ -195,9 +227,13 @@ def update_distance():
                 state["hc_online"] = True
                 state["last_hc_time"] = time.time()
 
-                log_event(
-                    f"Ultrasonic: {distance_string} cm"
-                )
+                # Only log when approaching obstacle threshold to avoid spamming the console
+                try:
+                    d_val = float(distance_string)
+                    if d_val <= TRIGGER_CM:
+                        log_event(f"Obstacle close: {distance_string} cm")
+                except Exception:
+                    pass
 
         return jsonify({
             "status": "ok",
@@ -566,13 +602,10 @@ Do not explain your reasoning.
         )
 
         state["ai"] = "ERROR"
-
-        state["last_result"] = (
-            "AI error: " + str(e)
-        )
+        state["error_msg"] = f"AI error: {str(e)}"
 
         log_event(
-            "AI Error: " + str(e)
+            f"AI Error: {str(e)[:60]}"
         )
 
         return jsonify({
@@ -645,7 +678,7 @@ def vision_trigger():
 
         image_response = requests.get(
             f"http://{cam_ip}/capture",
-            timeout=5
+            timeout=3
         )
 
         if image_response.status_code != 200:
@@ -661,8 +694,8 @@ def vision_trigger():
 
     except Exception as e:
         state["ai"] = "ERROR"
-        state["last_result"] = f"Capture error: {str(e)}"
-        log_event(f"Capture failed: {str(e)}")
+        state["error_msg"] = f"Capture error: {str(e)}"
+        log_event(f"Capture failed: {str(e)[:60]}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -701,6 +734,16 @@ def configure(
         PORT = int(port)
     except Exception:
         PORT = 5000
+
+    state["cam_online"] = False
+    state["hc_online"] = False
+
+    if CAM_IP:
+        threading.Thread(
+            target=configure_camera_low_latency,
+            args=(CAM_IP,),
+            daemon=True
+        ).start()
 
     if GROQ_API_KEY:
         try:

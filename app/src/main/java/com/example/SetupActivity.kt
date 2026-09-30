@@ -18,6 +18,7 @@ class SetupActivity : Activity() {
         val etGroqKey = findViewById<EditText>(R.id.etGroqKey)
         val etTriggerCm = findViewById<EditText>(R.id.etTriggerCm)
         val etCooldown = findViewById<EditText>(R.id.etCooldown)
+        val etCamQuality = findViewById<EditText>(R.id.etCamQuality)
         val etPort = findViewById<EditText>(R.id.etPort)
         val btnSaveLaunch = findViewById<Button>(R.id.btnSaveLaunch)
 
@@ -25,6 +26,7 @@ class SetupActivity : Activity() {
         etGroqKey.setText(prefs.getString("groq_api_key", ""))
         etTriggerCm.setText(prefs.getString("trigger_cm", "30"))
         etCooldown.setText(prefs.getString("cooldown_ms", "6000"))
+        etCamQuality.setText(prefs.getString("cam_quality", "25"))
         etPort.setText(prefs.getString("port", "5000"))
 
         btnSaveLaunch.setOnClickListener {
@@ -33,6 +35,7 @@ class SetupActivity : Activity() {
                 putString("groq_api_key", etGroqKey.text.toString())
                 putString("trigger_cm", etTriggerCm.text.toString())
                 putString("cooldown_ms", etCooldown.text.toString())
+                putString("cam_quality", etCamQuality.text.toString())
                 putString("port", etPort.text.toString())
                 putBoolean("is_setup", true)
                 apply()
@@ -44,7 +47,10 @@ class SetupActivity : Activity() {
             }
             startService(serviceIntent)
             
-            startActivity(Intent(this, MainActivity::class.java))
+            val mainIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            startActivity(mainIntent)
             finish()
         }
     }

@@ -25,12 +25,13 @@ class VisionService : Service(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private var lastSpokenResult = ""
     private var port = "5000"
-    private var hasAnnouncedStartup = false
+    private var hasSpokenStopForCurrentObstacle = false
     private var pollingThread: Thread? = null
 
     companion object {
         var isRunning = false
         var pythonServerStarted = false
+        var isMainActivityForeground = false
     }
 
     override fun onCreate() {
@@ -66,6 +67,7 @@ class VisionService : Service(), TextToSpeech.OnInitListener {
         val groqKey = prefs.getString("groq_api_key", "") ?: ""
         val triggerCm = prefs.getString("trigger_cm", "30") ?: "30"
         val cooldownMs = prefs.getString("cooldown_ms", "6000") ?: "6000"
+        val camQuality = prefs.getString("cam_quality", "25") ?: "25"
         port = prefs.getString("port", "5000") ?: "5000"
 
         val py = Python.getInstance()
@@ -75,6 +77,7 @@ class VisionService : Service(), TextToSpeech.OnInitListener {
         environ?.callAttr("__setitem__", "GROQ_API_KEY", groqKey)
         environ?.callAttr("__setitem__", "TRIGGER_CM", triggerCm)
         environ?.callAttr("__setitem__", "COOLDOWN_MS", cooldownMs)
+        environ?.callAttr("__setitem__", "CAM_QUALITY", camQuality)
         environ?.callAttr("__setitem__", "PORT", port)
 
         val serverModule = py.getModule("server")
@@ -111,16 +114,8 @@ class VisionService : Service(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
-            if (!hasAnnouncedStartup) {
-                tts?.speak("VisionGuide background service active", TextToSpeech.QUEUE_FLUSH, null, null)
-                hasAnnouncedStartup = true
-            }
             startPollingThread()
         }
-    }
-
-    private fun speak(text: String) {
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
     }
 
     private fun startPollingThread() {
@@ -131,18 +126,39 @@ class VisionService : Service(), TextToSpeech.OnInitListener {
                 try {
                     val url = URL("http://localhost:$port/status")
                     val conn = url.openConnection() as HttpURLConnection
-                    conn.connectTimeout = 1000
-                    conn.readTimeout = 1000
+                    conn.connectTimeout = 800
+                    conn.readTimeout = 800
                     if (conn.responseCode == 200) {
                         val stream = conn.inputStream
                         val response = stream.bufferedReader().use { it.readText() }
                         val json = JSONObject(response)
                         
+                        val aiStatus = json.optString("ai", "OFFLINE")
+                        val distanceStr = json.optString("distance_cm", "")
                         val lastResult = json.optString("last_result", "")
+                        val prefs = getSharedPreferences("VisionGuidePrefs", Context.MODE_PRIVATE)
+                        val triggerThreshold = prefs.getString("trigger_cm", "30")?.toFloatOrNull() ?: 30f
+                        val d = distanceStr.toFloatOrNull()
                         
-                        if (lastResult.isNotEmpty() && lastResult != lastSpokenResult) {
-                            lastSpokenResult = lastResult
-                            speak(lastResult)
+                        if (!isMainActivityForeground) {
+                            val isObstacle = (d != null && d <= triggerThreshold) || aiStatus == "PROCESSING"
+
+                            // 1. Say "Stop." immediately when obstacle detected
+                            if (isObstacle) {
+                                if (!hasSpokenStopForCurrentObstacle) {
+                                    hasSpokenStopForCurrentObstacle = true
+                                    tts?.speak("Stop.", TextToSpeech.QUEUE_FLUSH, null, null)
+                                }
+                            } else if (d != null && d > triggerThreshold + 5f && aiStatus != "PROCESSING") {
+                                hasSpokenStopForCurrentObstacle = false
+                            }
+
+                            // 2. Say AI output out loud immediately
+                            if (lastResult.isNotEmpty() && lastResult != lastSpokenResult && isInstructionSpeech(lastResult)) {
+                                lastSpokenResult = lastResult
+                                tts?.speak(lastResult, TextToSpeech.QUEUE_ADD, null, null)
+                                hasSpokenStopForCurrentObstacle = false
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -150,12 +166,35 @@ class VisionService : Service(), TextToSpeech.OnInitListener {
                 }
                 
                 try {
-                    Thread.sleep(1000)
+                    Thread.sleep(800)
                 } catch (e: InterruptedException) {
                     break
                 }
             }
         }
+    }
+
+    private fun isInstructionSpeech(text: String): Boolean {
+        val clean = text.trim()
+        if (clean.isEmpty()) return false
+        val lower = clean.lowercase()
+        if (lower == "ai ready" ||
+            lower.contains("ai ready") ||
+            lower.startsWith("visionguide ready") ||
+            lower.startsWith("capture error") ||
+            lower.startsWith("ai error") ||
+            lower.startsWith("error") ||
+            lower.startsWith("capture failed") ||
+            lower.contains("timed out") ||
+            lower.contains("httpconnectionpool") ||
+            lower.contains("connection refused") ||
+            lower.contains("exception") ||
+            lower.startsWith("refreshing connections") ||
+            lower.startsWith("starting visionguide") ||
+            lower.contains("all systems connected")) {
+            return false
+        }
+        return true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

@@ -32,6 +32,9 @@
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Cooldown Seconds" android:textColor="#AAAAAA"/>
         <EditText android:id="@+id/etCooldown" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#555555" android:inputType="number" android:layout_marginBottom="16dp"/>
 
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Camera Quality (10-63, 25=Fast Low Latency)" android:textColor="#AAAAAA"/>
+        <EditText android:id="@+id/etCamQuality" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#555555" android:inputType="number" android:layout_marginBottom="16dp"/>
+
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Flask Port" android:textColor="#AAAAAA"/>
         <EditText android:id="@+id/etPort" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textColorHint="#555555" android:inputType="number" android:layout_marginBottom="32dp"/>
 

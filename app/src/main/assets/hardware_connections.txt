@@ -10,34 +10,60 @@
    GND         -----> GND                   Ground reference
    TRIG        -----> GPIO 5                Ultrasonic trigger pulse (Output)
    ECHO        -----> GPIO 19               Ultrasonic echo duration (Input)
+                                            *NOTE: HC-SR04 Echo is 5V. Use a
+                                            1k/2k resistor voltage divider to step
+                                            down 5V to 3.3V for ESP32-S3 GPIO 19,
+                                            or use 3.3V-tolerant HC-SR04P sensor.
+
+   VOLTAGE DIVIDER WIRING:
+   HC-SR04 ECHO ---> [ 1k Ohm Resistor ] ---> ESP32-S3 GPIO 19
+                                         |
+                                 [ 2k Ohm Resistor ]
+                                         |
+                                        GND
 
    POWER SOURCE FOR ESP32-S3:
    - Power via USB from a 5V Power Bank or 5V Battery pack.
 
 
-2. ESP32-CAM MODULE:
+2. ESP32-CAM MODULE & LATENCY/STABILITY OPTIMIZATIONS:
 -----------------------------------------------------------------------------
    ESP32-CAM PIN      CONNECTION / NOTE
    --------------------------------------------------------------------------
    5V / VIN    -----> 5V Output from Power Bank / Battery
    GND         -----> Ground (GND)
 
-   POWER SOURCE FOR ESP32-CAM:
-   - Power with a 5V Power Bank (or high-current 5V battery source).
-   - ESP32-CAM requires stable >=1.5A peak current during Wi-Fi transmission
-     and video streaming to avoid brownout resets.
+   POWER SOURCE & BROWNOUT PREVENTION (FIXES CONNECT/DISCONNECT LOOPS):
+   - ESP32-CAM draws up to 450-500mA peak pulses during Wi-Fi transmission.
+     Powering from a computer USB port or thin jumper wires causes 3.3V dips
+     that trigger "Brownout detector was triggered" reboot loops!
+   - Use a dedicated 5V power bank or 5V 2A adapter.
+   - Solder a 470uF to 1000uF capacitor across 5V and GND on the ESP32-CAM.
+   - Flash the optimized sketch in assets/esp32_cam_low_latency.txt:
+     it contains `WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);` to disable
+     the brownout reset trigger!
+
+   ULTRA LOW LATENCY CONFIGURATION (SUB-200ms STREAMING):
+   - Resolution: Set to FRAMESIZE_QVGA (320x240) in Camera settings.
+     This drops JPEG size from 60KB to ~6KB, cutting latency by 85%!
+   - Quality: Set to 25 (higher compression, lowest transmission lag).
+   - Grab Mode: `config.grab_mode = CAMERA_GRAB_LATEST;`
+     (Critical: eliminates the 2-frame buffer lag so stream is real-time!)
+   - Wi-Fi Sleep: `WiFi.setSleep(false);`
+     (Critical: removes 100-300ms packet latency jitter!)
 
 
 3. NETWORK & PHONE SETUP:
 -----------------------------------------------------------------------------
    - All three devices (ESP32-S3, ESP32-CAM, and the Phone) MUST connect 
      to the SAME Wi-Fi network or Phone Mobile Hotspot.
-   - Central Phone IP: See "Phone IP:" on the app screen (e.g. 10.122.3.219:5000).
+   - Central Phone IP: See "Phone IP:" on the app screen (e.g. 192.168.1.100:5000).
    - ESP32-S3 HTTP endpoints:
        * Heartbeat:        POST http://<PHONE_IP>:5000/distance
        * Obstacle Trigger: POST http://<PHONE_IP>:5000/vision_trigger
    - ESP32-CAM endpoints:
        * Live Stream:      http://<CAM_IP>:81/stream
        * Capture Image:    http://<CAM_IP>/capture
+       * Control Endpoint: http://<CAM_IP>/control?var=framesize&val=5
 
 =============================================================================

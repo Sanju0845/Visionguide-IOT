@@ -48,7 +48,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var lastCamOnline = false
     private var lastAiReady = false
     private var lastHcOnline = false
-    private var hasAnnouncedLive = false
+    private var hasSpokenStopForCurrentObstacle = false
+    private var cachedIp = ""
+    private var lastIpCheckTime = 0L
 
     companion object {
         var pythonServerStarted = false
@@ -89,7 +91,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         ivRefresh.setOnClickListener {
-            speak("Refreshing connections")
+            cachedIp = "" // Force fresh IP lookup
             val py = Python.getInstance()
             val serverModule = py.getModule("server")
             try {
@@ -107,10 +109,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             webViewCam.reload()
         }
 
-        // Setup WebView for MJPEG stream
-        webViewCam.settings.javaScriptEnabled = true
-        webViewCam.settings.loadWithOverviewMode = true
-        webViewCam.settings.useWideViewPort = true
+        // Setup WebView: Use software layer to prevent MESA rendernode GPU context errors
+        webViewCam.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        webViewCam.settings.apply {
+            javaScriptEnabled = false
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            setSupportZoom(false)
+        }
 
         tts = TextToSpeech(this, this)
 
@@ -121,12 +127,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
+        VisionService.isMainActivityForeground = true
+
         val prefs = getSharedPreferences("VisionGuidePrefs", Context.MODE_PRIVATE)
         camIp = prefs.getString("cam_ip", "") ?: ""
         groqKey = prefs.getString("groq_api_key", "") ?: ""
         triggerCm = prefs.getString("trigger_cm", "30") ?: "30"
         cooldownMs = prefs.getString("cooldown_ms", "6000") ?: "6000"
         port = prefs.getString("port", "5000") ?: "5000"
+
+        val camQuality = prefs.getString("cam_quality", "25") ?: "25"
 
         val py = Python.getInstance()
         val os = py.getModule("os")
@@ -135,6 +145,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         environ?.callAttr("__setitem__", "GROQ_API_KEY", groqKey)
         environ?.callAttr("__setitem__", "TRIGGER_CM", triggerCm)
         environ?.callAttr("__setitem__", "COOLDOWN_MS", cooldownMs)
+        environ?.callAttr("__setitem__", "CAM_QUALITY", camQuality)
         environ?.callAttr("__setitem__", "PORT", port)
 
         val serverModule = py.getModule("server")
@@ -164,26 +175,53 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         
         // Update WebView stream with potentially new IP
-        val html = """
-            <html>
-            <body style="margin:0;padding:0;background:#111;overflow:hidden;display:flex;align-items:center;justify-content:center;">
-                <img src="http://$camIp:81/stream" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'><rect width=\'100%\' height=\'100%\' fill=\'%23222\'/><text x=\'50\' y=\'50\' fill=\'%23666\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'10\'>Stream Offline</text></svg>'">
-            </body>
-            </html>
-        """.trimIndent()
-        webViewCam.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+        if (camIp.isNotEmpty()) {
+            val html = """
+                <html>
+                <body style="margin:0;padding:0;background:#111;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+                    <img src="http://$camIp:81/stream" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'><rect width=\'100%\' height=\'100%\' fill=\'%23222\'/><text x=\'50\' y=\'50\' fill=\'%23666\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'10\'>Stream Offline</text></svg>'">
+                </body>
+                </html>
+            """.trimIndent()
+            webViewCam.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+        }
+
+        // Restart polling loop cleanly on resume
+        handler.removeCallbacks(pollRunnable)
+        handler.post(pollRunnable)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        VisionService.isMainActivityForeground = false
+        // Stop polling runnable when paused to prevent background CPU/audit loops
+        handler.removeCallbacks(pollRunnable)
+        // Stop streaming to free ESP32-CAM socket and save power
+        try {
+            webViewCam.stopLoading()
+            webViewCam.loadUrl("about:blank")
+        } catch (e: Exception) {
+            Log.e("VisionGuide", "Error stopping WebView", e)
+        }
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
-            speak("Starting VisionGuide")
+            handler.removeCallbacks(pollRunnable)
             handler.post(pollRunnable)
         }
     }
 
-    private fun speak(text: String) {
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+    private fun speakImmediateStop() {
+        tts?.speak("Stop.", TextToSpeech.QUEUE_FLUSH, null, null)
+    }
+
+    private fun speakAiResponse(text: String) {
+        val clean = text.trim()
+        if (clean.isEmpty()) return
+        // QUEUE_ADD ensures the AI instruction plays right after Stop without being cut off
+        tts?.speak(clean, TextToSpeech.QUEUE_ADD, null, null)
     }
 
     private fun pollStatus() {
@@ -191,8 +229,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             try {
                 val url = URL("http://localhost:$port/status")
                 val conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 1000
-                conn.readTimeout = 1000
+                conn.connectTimeout = 800
+                conn.readTimeout = 800
                 if (conn.responseCode == 200) {
                     val stream = conn.inputStream
                     val response = stream.bufferedReader().use { it.readText() }
@@ -210,7 +248,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread { updateUI(camOnline, aiStatus, hcOnline, lastResult, latency, distance, eventLog) }
                 }
             } catch (e: Exception) {
-                Log.e("VisionGuide", "Poll error", e)
+                // Silently handle expected network startup transitions; avoid filling logcat
             }
         }
     }
@@ -227,52 +265,54 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         // Cam Status
         if (camOnline) {
             tvCamStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#22C55E"))
-            if (!lastCamOnline) speak("Camera connected")
         } else {
             tvCamStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
         }
         lastCamOnline = camOnline
 
         // AI Status
-        val aiReady = aiStatus == "READY"
         when (aiStatus) {
             "READY" -> {
                 tvAiStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#22C55E"))
-                if (!lastAiReady) speak("AI ready")
             }
             "PROCESSING", "BUSY" -> {
                 tvAiStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F59E0B"))
-                if (lastAiReady) {
-                    speak("Stop.")
-                }
             }
             else -> {
                 tvAiStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
             }
         }
-        lastAiReady = aiReady
+        lastAiReady = (aiStatus == "READY")
 
         // HC Sensor Status
         if (hcOnline) {
             tvHcStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#22C55E"))
-            if (!lastHcOnline) speak("Ultrasonic sensor active")
         } else {
             tvHcStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
         }
         lastHcOnline = hcOnline
 
-        // Live announcement
-        if (camOnline && aiReady && !hasAnnouncedLive) {
-            hasAnnouncedLive = true
-            speak("All systems connected. VisionGuide is live.")
+        // 1. Immediately when obstacle detected: say "Stop." out loud (once per event)
+        val d = distance.toFloatOrNull()
+        val trig = triggerCm.toFloatOrNull() ?: 30f
+        val isObstacleDetected = (d != null && d <= trig) || aiStatus == "PROCESSING"
+
+        if (isObstacleDetected) {
+            if (!hasSpokenStopForCurrentObstacle) {
+                hasSpokenStopForCurrentObstacle = true
+                speakImmediateStop()
+            }
+        } else if (d != null && d > trig + 5f && aiStatus != "PROCESSING") {
+            hasSpokenStopForCurrentObstacle = false
         }
 
-        // Result handling (Compact Banner, not huge empty block)
+        // 2. When AI gives output: say out loud immediately (smoothly following Stop)
         if (lastResult.isNotEmpty()) {
             tvAiResult.text = lastResult
-            if (lastResult != lastSpokenResult) {
-                speak(lastResult)
+            if (lastResult != lastSpokenResult && isInstructionSpeech(lastResult)) {
                 lastSpokenResult = lastResult
+                speakAiResponse(lastResult)
+                hasSpokenStopForCurrentObstacle = false
             }
         } else {
             tvAiResult.text = "VisionGuide Ready"
@@ -298,7 +338,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             tvDistance.setTextColor(Color.parseColor("#8b949e"))
         }
 
-        val myIp = getLocalIpAddress()
+        val myIp = getCachedOrFreshIp()
         tvPhoneIp.text = "Phone IP: $myIp:$port"
 
         // Live scrollable console outputs
@@ -315,6 +355,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
         }
+    }
+
+    private fun getCachedOrFreshIp(): String {
+        val now = System.currentTimeMillis()
+        if (cachedIp.isEmpty() || (now - lastIpCheckTime) > 30000) {
+            cachedIp = getLocalIpAddress()
+            lastIpCheckTime = now
+        }
+        return cachedIp
     }
 
     private fun getLocalIpAddress(): String {
@@ -347,6 +396,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             Log.e("VisionGuide", "Error getting IP", e)
         }
         return "127.0.0.1"
+    }
+
+    private fun isInstructionSpeech(text: String): Boolean {
+        val clean = text.trim()
+        if (clean.isEmpty()) return false
+        val lower = clean.lowercase()
+        if (lower == "ai ready" ||
+            lower.contains("ai ready") ||
+            lower.startsWith("visionguide ready") ||
+            lower.startsWith("capture error") ||
+            lower.startsWith("ai error") ||
+            lower.startsWith("error") ||
+            lower.startsWith("capture failed") ||
+            lower.contains("timed out") ||
+            lower.contains("httpconnectionpool") ||
+            lower.contains("connection refused") ||
+            lower.contains("exception") ||
+            lower.startsWith("refreshing connections") ||
+            lower.startsWith("starting visionguide") ||
+            lower.contains("all systems connected")) {
+            return false
+        }
+        return true
     }
 
     override fun onDestroy() {

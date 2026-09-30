@@ -4,9 +4,17 @@
  * =========================================================================
  * Pins:
  *   TRIG_PIN : GPIO 5
- *   ECHO_PIN : GPIO 19
+ *   ECHO_PIN : GPIO 19  (IMPORTANT: HC-SR04 Echo is 5V. Use 1k/2k voltage divider
+ *                        to step down 5V -> 3.3V for ESP32-S3, or use 3.3V HC-SR04P)
  *   VCC      : 5V (VIN / 5V pin on ESP32-S3)
- *   GND      : GND
+ *   GND      : GND (Common Ground)
+ * 
+ * Voltage Divider Wiring for ECHO Pin:
+ *   HC-SR04 ECHO ---> [ 1k Ohm Resistor ] ---> ESP32-S3 GPIO 19
+ *                                         |
+ *                                 [ 2k Ohm Resistor ]
+ *                                         |
+ *                                        GND
  * 
  * Logic & Network:
  *   1. Regular Distance Heartbeat (every 1.5s):
@@ -49,6 +57,7 @@ const unsigned long HEARTBEAT_MS = 1500; // 1.5 seconds between distance updates
 // State variables
 unsigned long lastTriggerTime = 0;
 unsigned long lastHeartbeatTime = 0;
+int obstacleConfirmCount = 0;
 
 // Function prototypes
 float measureDistance();
@@ -107,22 +116,28 @@ void loop() {
   if (distance > 0.0) {
     unsigned long now = millis();
 
-    // 2. Check for OBSTACLE TRIGGER (< 30 cm and >= 3 cm)
+    // 2. Check for OBSTACLE TRIGGER (< 30 cm and >= 3 cm) with glitch confirmation
     if (distance >= 3.0 && distance <= TRIGGER_DISTANCE_CM) {
-      if (now - lastTriggerTime >= COOLDOWN_MS) {
-        Serial.printf("\n[ALERT] Obstacle in range: %.1f cm! Sending trigger...\n", distance);
-        sendVisionTrigger(distance);
-        lastTriggerTime = millis();
-        lastHeartbeatTime = millis(); // Reset heartbeat so we don't double send
-      } else {
-        Serial.printf("[COOLDOWN] Obstacle at %.1f cm (cooldown active)\n", distance);
+      obstacleConfirmCount++;
+      if (obstacleConfirmCount >= 2) {
+        if (now - lastTriggerTime >= COOLDOWN_MS) {
+          Serial.printf("\n[ALERT] Confirmed obstacle in range: %.1f cm! Sending trigger...\n", distance);
+          sendVisionTrigger(distance);
+          lastTriggerTime = millis();
+          lastHeartbeatTime = millis(); // Reset heartbeat so we don't double send
+        } else {
+          Serial.printf("[COOLDOWN] Obstacle at %.1f cm (cooldown active)\n", distance);
+        }
       }
     } 
     // 3. Regular Heartbeat (Keeps "HC SENSOR" capsule GREEN on the phone)
-    else if (now - lastHeartbeatTime >= HEARTBEAT_MS) {
-      Serial.printf("[HEARTBEAT] Path clear: %.1f cm -> Sending distance update\n", distance);
-      sendDistanceUpdate(distance);
-      lastHeartbeatTime = millis();
+    else {
+      obstacleConfirmCount = 0;
+      if (now - lastHeartbeatTime >= HEARTBEAT_MS) {
+        Serial.printf("[HEARTBEAT] Path clear: %.1f cm -> Sending distance update\n", distance);
+        sendDistanceUpdate(distance);
+        lastHeartbeatTime = millis();
+      }
     }
   }
 
