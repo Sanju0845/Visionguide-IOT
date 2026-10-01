@@ -83,6 +83,7 @@ class VisionService : Service(), TextToSpeech.OnInitListener {
         val serverModule = py.getModule("server")
         try {
             serverModule.callAttr("configure", camIp, groqKey, triggerCm, cooldownMs, port)
+            serverModule.callAttr("set_obstacle_callback", ServiceObstacleListener(this))
         } catch (e: Exception) {
             Log.e("VisionGuide", "Error calling configure", e)
         }
@@ -213,4 +214,21 @@ class VisionService : Service(), TextToSpeech.OnInitListener {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    class ServiceObstacleListener(private val service: VisionService) {
+        fun onObstacle() {
+            if (!isMainActivityForeground && !service.hasSpokenStopForCurrentObstacle) {
+                service.hasSpokenStopForCurrentObstacle = true
+                service.tts?.speak("Stop.", TextToSpeech.QUEUE_FLUSH, null, null)
+            }
+        }
+
+        fun onAiResult(result: String) {
+            if (!isMainActivityForeground && service.isInstructionSpeech(result)) {
+                service.lastSpokenResult = result
+                service.tts?.speak(result, TextToSpeech.QUEUE_ADD, null, null)
+                service.hasSpokenStopForCurrentObstacle = false
+            }
+        }
+    }
 }

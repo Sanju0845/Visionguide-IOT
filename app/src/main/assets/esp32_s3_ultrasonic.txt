@@ -116,23 +116,17 @@ void loop() {
   if (distance > 0.0) {
     unsigned long now = millis();
 
-    // 2. Check for OBSTACLE TRIGGER (< 30 cm and >= 3 cm) with glitch confirmation
-    if (distance >= 3.0 && distance <= TRIGGER_DISTANCE_CM) {
-      obstacleConfirmCount++;
-      if (obstacleConfirmCount >= 2) {
-        if (now - lastTriggerTime >= COOLDOWN_MS) {
-          Serial.printf("\n[ALERT] Confirmed obstacle in range: %.1f cm! Sending trigger...\n", distance);
-          sendVisionTrigger(distance);
-          lastTriggerTime = millis();
-          lastHeartbeatTime = millis(); // Reset heartbeat so we don't double send
-        } else {
-          Serial.printf("[COOLDOWN] Obstacle at %.1f cm (cooldown active)\n", distance);
-        }
+    // 2. Check for OBSTACLE TRIGGER (<= 30 cm and >= 2 cm) - Instantaneous trigger
+    if (distance >= 2.0 && distance <= TRIGGER_DISTANCE_CM) {
+      if (now - lastTriggerTime >= COOLDOWN_MS) {
+        Serial.printf("\n[IMMEDIATE ALERT] Obstacle detected: %.1f cm! Sending instant trigger...\n", distance);
+        sendVisionTrigger(distance);
+        lastTriggerTime = millis();
+        lastHeartbeatTime = millis(); // Reset heartbeat so we don't double send
       }
     } 
     // 3. Regular Heartbeat (Keeps "HC SENSOR" capsule GREEN on the phone)
     else {
-      obstacleConfirmCount = 0;
       if (now - lastHeartbeatTime >= HEARTBEAT_MS) {
         Serial.printf("[HEARTBEAT] Path clear: %.1f cm -> Sending distance update\n", distance);
         sendDistanceUpdate(distance);

@@ -103,6 +103,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     cooldownMs,
                     port
                 )
+                serverModule.callAttr("set_obstacle_callback", PythonObstacleListener(this))
             } catch (e: Exception) {
                 Log.e("VisionGuide", "Error calling configure", e)
             }
@@ -158,6 +159,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 cooldownMs,
                 port
             )
+            serverModule.callAttr("set_obstacle_callback", PythonObstacleListener(this))
         } catch (e: Exception) {
             Log.e("VisionGuide", "Error calling configure", e)
         }
@@ -426,5 +428,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tts?.shutdown()
         handler.removeCallbacks(pollRunnable)
         super.onDestroy()
+    }
+
+    class PythonObstacleListener(private val activity: MainActivity) {
+        fun onObstacle() {
+            activity.runOnUiThread {
+                if (!activity.hasSpokenStopForCurrentObstacle) {
+                    activity.hasSpokenStopForCurrentObstacle = true
+                    activity.speakImmediateStop()
+                }
+            }
+        }
+
+        fun onAiResult(result: String) {
+            activity.runOnUiThread {
+                if (activity.isInstructionSpeech(result)) {
+                    activity.lastSpokenResult = result
+                    activity.tvAiResult.text = result
+                    activity.speakAiResponse(result)
+                    activity.hasSpokenStopForCurrentObstacle = false
+                }
+            }
+        }
     }
 }

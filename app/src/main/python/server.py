@@ -227,10 +227,11 @@ def update_distance():
                 state["hc_online"] = True
                 state["last_hc_time"] = time.time()
 
-                # Only log when approaching obstacle threshold to avoid spamming the console
+                # Only log and trigger immediate stop when approaching obstacle threshold
                 try:
                     d_val = float(distance_string)
                     if d_val <= TRIGGER_CM:
+                        notify_obstacle_immediate()
                         log_event(f"Obstacle close: {distance_string} cm")
                 except Exception:
                     pass
@@ -492,6 +493,34 @@ def index():
 
 
 # ============================================================
+#                 FAST IN-PROCESS CALLBACK BRIDGE
+# ============================================================
+
+obstacle_callback = None
+
+def set_obstacle_callback(cb):
+    global obstacle_callback
+    obstacle_callback = cb
+    print("[Bridge] In-process obstacle callback registered")
+
+def notify_obstacle_immediate():
+    global obstacle_callback
+    if obstacle_callback is not None:
+        try:
+            obstacle_callback.onObstacle()
+        except Exception as e:
+            print(f"[Callback] onObstacle error: {e}")
+
+def notify_ai_result(text):
+    global obstacle_callback
+    if obstacle_callback is not None:
+        try:
+            obstacle_callback.onAiResult(text)
+        except Exception as e:
+            print(f"[Callback] onAiResult error: {e}")
+
+
+# ============================================================
 #                 GROQ VISION PROCESSING (QWEN MODEL)
 # ============================================================
 
@@ -518,27 +547,23 @@ def process_vision_data(image_data):
             image_data
         ).decode("utf-8")
 
-        prompt = """
-You are a navigation assistant for a visually impaired person.
-
-Look at this single camera image.
-
-Return ONE very short navigation instruction only.
-
-Mention the main obstacle/object and a simple safe direction.
-
-Use approximate steps only when visually reasonable.
-
-Examples:
-
-"Chair ahead. Move two steps right."
-
-"Person ahead. Stop and wait."
-
-"Clear ahead. Continue."
-
-Do not explain your reasoning.
-"""
+        prompt = (
+            "You are an orientation and mobility guide assisting a blind pedestrian walking right now. "
+            "Analyze this camera view with urgent spatial precision. "
+            "Output ONE immediate navigation instruction (maximum 7 words). "
+            "Rules: "
+            "1. Name the primary obstacle or hazard blocking path. "
+            "2. Give precise clock position (12 o'clock = dead ahead, 1 o'clock = slight right, 11 o'clock = slight left) or height level. "
+            "3. Give a clear, actionable physical command with exact paces or angle. "
+            "Examples: "
+            "'Pillar dead ahead. Step two paces right.' "
+            "'Descending stairs ahead. Stop at edge.' "
+            "'Bicycle at 11 o'clock. Step right.' "
+            "'Low table waist-level. Step left.' "
+            "'Doorway open at 1 o'clock. Walk forward.' "
+            "'Path clear ahead. Continue straight.' "
+            "No conversational filler, exactly one short instruction."
+        )
 
         response = client.chat.completions.create(
 
@@ -564,8 +589,8 @@ Do not explain your reasoning.
                 }
             ],
 
-            max_tokens=60,
-            temperature=0
+            max_tokens=25,
+            temperature=0.0
         )
 
         result_text = (
@@ -583,6 +608,8 @@ Do not explain your reasoning.
         )
 
         state["ai"] = "READY"
+
+        notify_ai_result(result_text)
 
         log_event(
             f"AI: {result_text} "
@@ -639,6 +666,8 @@ def process_vision():
     methods=["POST", "GET"]
 )
 def vision_trigger():
+    notify_obstacle_immediate()
+    state["ai"] = "PROCESSING"
     cam_ip = os.environ.get("CAM_IP", CAM_IP)
     try:
 
