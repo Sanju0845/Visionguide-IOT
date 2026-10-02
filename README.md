@@ -1,19 +1,33 @@
 # VisionGuide IoT
 
-VisionGuide is an assistive navigation system for visually impaired users. It combines an Android application, an ESP32-CAM, an ESP32-S3 ultrasonic sensor, and Groq vision AI to detect nearby obstacles and provide short voice navigation instructions.
+VisionGuide is an assistive navigation system for visually impaired users. It combines an Android application, an ESP32-CAM, an ESP32-S3 ultrasonic sensor, and Groq vision AI to detect nearby obstacles and provide immediate spoken guidance.
 
-The Android phone acts as the central hub. It receives distance measurements from the ESP32-S3, requests images from the ESP32-CAM, sends images to a Groq vision model, and reads the resulting instruction aloud using Android Text-to-Speech.
+The Android phone acts as the central hub. It receives distance measurements from the ESP32-S3, requests images from the ESP32-CAM, sends images to a Groq vision model, and reads the resulting instructions aloud.
 
 ## About
 
 VisionGuide is designed to improve walking safety by detecting obstacles in front of a user and giving immediate spoken guidance such as:
 
-- “Stop.”
-- “Bicycle at 11 o’clock. Step right.”
-- “Path clear ahead. Continue straight.”
-- “Descending stairs ahead. Stop at edge.”
+- "Stop."
+- "Bicycle at 11 o'clock. Step right."
+- "Path clear ahead. Continue straight."
+- "Descending stairs ahead. Stop at edge."
 
 The project is intended for educational, prototype, and assistive-technology development. It should be tested carefully before being used as a primary mobility aid.
+
+### Media & Demonstration
+
+<div style="display: flex; gap: 20px; align-items: flex-start;">
+  <div style="flex: 1;">
+    <img src="camndsensor.png" alt="VisionGuide Hardware Setup - ESP32-CAM and HC-SR04 Ultrasonic Sensor" style="max-width: 100%; height: auto; border-radius: 8px;">
+  </div>
+  <div style="flex: 1;">
+    <video width="100%" height="auto" controls style="border-radius: 8px;">
+      <source src="vid2.mp4" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
+  </div>
+</div>
 
 ## Features
 
@@ -95,7 +109,7 @@ Android Text-to-Speech
 5. The image is sent to the Groq vision API.
 6. The AI returns one short navigation instruction.
 7. The Android app displays the instruction and speaks it aloud.
-8. The app immediately says “Stop.” when a nearby obstacle is detected.
+8. The app immediately says "Stop." when a nearby obstacle is detected.
 
 ## Repository structure
 
@@ -156,7 +170,7 @@ Android Text-to-Speech
 
 - `app/src/main/java/com/example/VisionService.kt`
 
-  Runs the monitoring process in the background as an Android foreground service. It starts Python through Chaquopy, polls the local Flask server, detects obstacles, and speaks instructions using Android Text-to-Speech.
+  Runs the monitoring process in the background as an Android foreground service. It starts Python through Chaquopy, polls the local Flask server, detects obstacles, and speaks instructions using Text-to-Speech.
 
 ### Python server
 
@@ -536,7 +550,7 @@ Check:
 - The AI status shown by `/status`
 - The event log for API errors
 
-### App says “Stop” repeatedly
+### App says "Stop" repeatedly
 
 The app uses a cooldown and obstacle reset threshold. Increase the cooldown value or confirm that the ultrasonic sensor is returning stable distance values.
 
