@@ -14,10 +14,8 @@
 .externalNativeBuild
 .cxx
 local.properties
-.env
 debug.keystore
 debug.keystore.base64
 .build-outputs/
-branch_structure.json
-temp_auto_push.bat
-temp_interactive_push.bat
+config.bat
+node_modules
